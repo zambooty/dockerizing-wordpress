@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # Reverse proxy service
+  nginx-proxy:
+    image: jwilder/nginx-proxy
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./certs:/etc/nginx/certs:ro
+      - ./vhost.d:/etc/nginx/vhost.d:ro
+      - ./html:/usr/share/nginx/html:ro
+      - ./conf.d:/etc/nginx/conf.d:ro
+    networks:
+      - web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Let's Encrypt companion container
+  letsencrypt:
+    image: jrcs/letsencrypt-nginx-proxy-companion
+    container_name: nginx-letsencrypt
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx-proxy
+      - ACME_CA_URI=https://acme-v02.api.letsencrypt.org/directory
+      - DEFAULT_EMAIL=mckale.g.jonas@gmail.com
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./certs:/etc/nginx/certs:rw
+      - ./vhost.d:/etc/nginx/vhost.d:rw
+      - ./html:/usr/share/nginx/html:rw
+    networks:
+      - web
+    restart: unless-stopped
+    depends_on:
+      - nginx-proxy
+
+  # Your SaaS web application
+  webapp:
+    build: .
+    container_name: my-saas-webapp
+    environment:
+      - VIRTUAL_HOST=mikes-server.ca
+      - LETSENCRYPT_HOST=mikes-server.ca
+      - LETSENCRYPT_EMAIL=mckale.g.jonas@gmail.com
+      - NODE_ENV=production
+      - PORT=3000
+    env_file:
+      - .env
+    expose:
+      - "3000"
+    networks:
+      - web
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - nginx-proxy
+      - letsencrypt
+
+networks:
+  web:
+    driver: bridge 
